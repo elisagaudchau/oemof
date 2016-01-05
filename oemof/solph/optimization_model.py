@@ -678,8 +678,10 @@ def _(e, om, block):
     See :func:`assembler`.
     """
 
+    # TODO: fix this to work with model.w[...]
+    # out_max ....
     # input output relation for simple transport
-    lc.add_simple_io_relation(om, block)
+    #lc.add_simple_io_relation(om, block)
     # bounds
-    var.set_bounds(om, block, side='output')
+    #var.set_bounds(om, block, side='output')
     return(om)
