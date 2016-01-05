@@ -218,12 +218,16 @@ class OptimizationModel(po.ConcreteModel):
                   isinstance(entity, cp.Source)):
                 if entity.outputs: result[entity] = result.get(entity, {})
                 for o in entity.outputs:
-                    result[entity][o] = [self.w[entity.uid, o.uid, t].value
+                    euid = (entity.uid if not isinstance(entity, cp.Transport)
+                                       else entity.inputs[0].uid)
+                    result[entity][o] = [self.w[euid, o.uid, t].value
                                          for t in self.timesteps]
 
                 for i in entity.inputs:
+                    euid = (entity.uid if not isinstance(entity, cp.Transport)
+                                       else entity.outputs[0].uid)
                     result[i] = result.get(i, {})
-                    result[i][entity] = [self.w[i.uid, entity.uid, t].value
+                    result[i][entity] = [self.w[i.uid, euid, t].value
                                          for t in self.timesteps]
 
             if isinstance(entity, cp.sources.DispatchSource):
