@@ -91,9 +91,10 @@ class OptimizationModel(po.ConcreteModel):
         edges = [(i.uid, c.uid) if not isinstance(c, cp.Transport) else
                  (i.uid, c.outputs[0].uid) #TODO: Raise error if len(outputs)>1
                  for c in self.components for i in c.inputs] + \
-                [(c.uid, o.uid) if not isinstance(c, cp.Transport) else
-                 (c.inputs[0].uid, o.uid)
-                 for c in self.components for o in c.outputs]
+                [(c.uid, o.uid)
+                 for c in self.components
+                 if not isinstance(c, cp.Transport)
+                 for o in c.outputs]
 
         var.add_continuous(model=self, edges=edges)
 
