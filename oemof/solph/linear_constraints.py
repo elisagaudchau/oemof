@@ -352,6 +352,10 @@ def add_global_output_limit(model, block=None):
               limit[e]
         # if bus is defined but has not outputs Constraint is skipped
         # TODO: should be logged as well?
+        # isinstance(lhs, (int, float)): Spezialfall wenn Fluß in fixe Sink
+        #                                begrenzt werden soll.
+        # TODO: Fehler werfen, da nicht bekann wie der Fall behandelt werden
+        #       soll.
         if isinstance(lhs, (int, float)) or limit[e] == float('inf'):
             return(po.Constraint.Skip)
         else:
