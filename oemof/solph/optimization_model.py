@@ -216,11 +216,17 @@ class OptimizationModel(po.ConcreteModel):
             if (  isinstance(entity, cp.Transformer) or
                   isinstance(entity, cp.Transport)   or
                   isinstance(entity, cp.Source)):
+                def is_tp(e): return isinstance(e, cp.Transport)
                 if entity.outputs: result[entity] = result.get(entity, {})
                 for o in entity.outputs:
                     euid = (entity.uid if not isinstance(entity, cp.Transport)
                                        else entity.inputs[0].uid)
-                    result[entity][o] = [self.w[euid, o.uid, t].value
+                    # TODO: This is a nice opportunity for a test.
+                    #       Before this fix using a Transport with an
+                    #       efficiency != 1 should yield wrong results.
+                    result[entity][o] = [(self.w[euid, o.uid, t].value * 1
+                                          if not is_tp(entity)
+                                          else entity.eta[0])
                                          for t in self.timesteps]
 
                 for i in entity.inputs:
