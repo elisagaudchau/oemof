@@ -86,8 +86,16 @@ class OptimizationModel(po.ConcreteModel):
         # calculate all edges ([('coal', 'pp_coal'),...])
         self.components = [e for e in self.entities
                            if isinstance(e, Component)]
-        self.all_edges = self.edges(self.components)
-        var.add_continuous(model=self, edges=self.all_edges)
+        # create a list of tuples
+        # e.g. [('coal', 'pp_coal'), ('pp_coal', 'b_el'),...]
+        edges = [(i.uid, c.uid) if not isinstance(c, cp.Transport) else
+                 (i.uid, c.outputs[0].uid) #TODO: Raise error if len(outputs)>1
+                 for c in self.components for i in c.inputs] + \
+                [(c.uid, o.uid) if not isinstance(c, cp.Transport) else
+                 (c.inputs[0].uid, o.uid)
+                 for c in self.components for o in c.outputs]
+
+        var.add_continuous(model=self, edges=edges)
 
         # group components by type (cbt: components by type)
         cbt = {}

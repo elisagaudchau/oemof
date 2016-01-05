@@ -55,6 +55,9 @@ Simon Hilpert (simon.hilpert@fh-flensburg.de)
 
 import pyomo.environ as po
 
+import oemof.core.network.entities.components as cp
+
+
 def add_bus_balance(model, block=None):
     """ Adds constraint for the input-ouput balance of bus objects.
 
@@ -72,12 +75,15 @@ def add_bus_balance(model, block=None):
 
     Parameters
     ----------
-    model : OptimizationModel() instance
+    model :  OptimizationModel() instance
     block : SimpleBlock()
 
     """
     if not block.objs or block.objs is None:
         raise ValueError('Failed to create busbalance. No busobjects defined!')
+
+    etas = {(t.inputs[0].uid, t.outputs[0].uid): t.eta[0]
+            for t in model.components if isinstance(t, cp.Transport)}
 
     uids = []
     I = {}
@@ -85,14 +91,21 @@ def add_bus_balance(model, block=None):
     for b in block.objs:
         if b.balanced == True:
             uids.append(b.uid)
-            I[b.uid] = [i.uid for i in b.inputs]
-            O[b.uid] = [o.uid for o in b.outputs]
+            I[b.uid] = [i.uid for i in b.inputs
+                              if not isinstance(i, cp.Transport)]
+            O[b.uid] = [o.uid for o in b.outputs
+                              if not isinstance(o, cp.Transport)]
+
 
     # component inputs/outputs are negative/positive in the bus balance
     def bus_balance_rule(block, e, t):
         lhs = 0
         lhs += sum(model.w[i, e, t] for i in I[e])
+        # lsh + exchange * eta
+        lhs += sum(model.w[i, e, t] * etas[i,e2] for (i,e2) in etas if e == e2)
         rhs = sum(model.w[e, o, t] for o in O[e])
+        # rhs plus exchange
+        rhs += sum(model.w[e, o, t] for (e2,o) in etas if e == e2)
         if e in block.excess_uids:
             rhs += block.excess_slack[e, t]
         if e in block.shortage_uids:
@@ -329,7 +342,9 @@ def add_global_output_limit(model, block=None):
     limit = {obj.uid: obj.sum_out_limit for obj in block.objs}
 
     # outputs: {'rcoal': ['coal'], 'rgas': ['gas'],...}
-    O = {obj.uid: [o.uid for o in obj.outputs[:]] for obj in block.objs}
+    O = {obj.uid: [o.uid if not isinstance(o, cp.Transport) else
+                   o.outputs[0].uid
+                   for o in obj.outputs] for obj in block.objs}
 
     # set upper bounds: sum(yearly commodity output) <= yearly_limit
     def output_limit_rule(block, e):
