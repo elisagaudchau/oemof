@@ -84,6 +84,16 @@ def add_bus_balance(model, block=None):
 
     etas = {(t.inputs[0].uid, t.outputs[0].uid): t.eta[0]
             for t in model.components if isinstance(t, cp.Transport)}
+    # maximum output for transports
+    out_max = {(t.inputs[0].uid, t.outputs[0].uid): t.out_max[0]
+              for t in model.components if isinstance(t, cp.Transport)}
+
+    tuples = [(t.inputs[0].uid, t.outputs[0].uid)
+              for t in model.components if isinstance(t, cp.Transport)]
+
+    for (e1, e2) in tuples:
+        for t in model.timesteps:
+            model.w[e1, e2, t].setub(out_max[e1, e2])
 
     uids = []
     I = {}
