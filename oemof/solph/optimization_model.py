@@ -86,8 +86,17 @@ class OptimizationModel(po.ConcreteModel):
         # calculate all edges ([('coal', 'pp_coal'),...])
         self.components = [e for e in self.entities
                            if isinstance(e, Component)]
-        self.all_edges = self.edges(self.components)
-        var.add_continuous(model=self, edges=self.all_edges)
+        # create a list of tuples
+        # e.g. [('coal', 'pp_coal'), ('pp_coal', 'b_el'),...]
+        edges = [(i.uid, c.uid) if not isinstance(c, cp.Transport) else
+                 (i.uid, c.outputs[0].uid) #TODO: Raise error if len(outputs)>1
+                 for c in self.components for i in c.inputs] + \
+                [(c.uid, o.uid)
+                 for c in self.components
+                 if not isinstance(c, cp.Transport)
+                 for o in c.outputs]
+
+        var.add_continuous(model=self, edges=edges)
 
         # group components by type (cbt: components by type)
         cbt = {}
@@ -214,14 +223,24 @@ class OptimizationModel(po.ConcreteModel):
             if (  isinstance(entity, cp.Transformer) or
                   isinstance(entity, cp.Transport)   or
                   isinstance(entity, cp.Source)):
+                def is_tp(e): return isinstance(e, cp.Transport)
                 if entity.outputs: result[entity] = result.get(entity, {})
                 for o in entity.outputs:
-                    result[entity][o] = [self.w[entity.uid, o.uid, t].value
+                    euid = (entity.uid if not isinstance(entity, cp.Transport)
+                                       else entity.inputs[0].uid)
+                    # TODO: This is a nice opportunity for a test.
+                    #       Before this fix using a Transport with an
+                    #       efficiency != 1 should yield wrong results.
+                    result[entity][o] = [(self.w[euid, o.uid, t].value * 1
+                                          if not is_tp(entity)
+                                          else entity.eta[0])
                                          for t in self.timesteps]
 
                 for i in entity.inputs:
+                    euid = (entity.uid if not isinstance(entity, cp.Transport)
+                                       else entity.outputs[0].uid)
                     result[i] = result.get(i, {})
-                    result[i][entity] = [self.w[i.uid, entity.uid, t].value
+                    result[i][entity] = [self.w[i.uid, euid, t].value
                                          for t in self.timesteps]
 
             if isinstance(entity, cp.sources.DispatchSource):
@@ -632,8 +651,10 @@ def _(e, om, block):
     See :func:`assembler`.
     """
 
+    # TODO: fix this to work with model.w[...]
+    # out_max ....
     # input output relation for simple transport
-    lc.add_simple_io_relation(om, block)
+    #lc.add_simple_io_relation(om, block)
     # bounds
-    var.set_bounds(om, block, side='output')
+    #var.set_bounds(om, block, side='output')
     return(om)
