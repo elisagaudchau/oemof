@@ -35,6 +35,10 @@ import pandas as pd
 
 # import solph module to create/process optimization model instance
 from oemof.solph import predefined_objectives as predefined_objectives
+
+# Outputlib
+from oemof.outputlib import to_pandas as tpd
+
 # import oemof base classes to create energy system objects
 from oemof.core import energy_system as es
 from oemof.core.network.entities import Bus
@@ -50,6 +54,15 @@ from oemof.core.network.entities.components import transformers as transformer
 data = pd.read_csv("storage_invest.csv", sep=",")
 timesteps = [t for t in range(8760)]
 
+###############################################################################
+# initialize the energy system
+###############################################################################
+
+simulation = es.Simulation(
+    timesteps=timesteps, stream_solver_output=True, solver='glpk',
+    objective_options={'function': predefined_objectives.minimize_cost})
+
+energysystem = es.EnergySystem(year=2016, simulation=simulation)
 
 ###############################################################################
 # set optimzation options for storage components
@@ -124,50 +137,48 @@ storage = transformer.Storage(uid='sto_simple',
                               c_rate_out=1/6)
 
 ###############################################################################
-# Create, solve and postprocess OptimizationModel instance
+# Optimise the energy system and plot the results
 ###############################################################################
 
-# group busses
-buses = [bgas, bel]
-
-# create lists of components
-transformers = [pp_gas]
-renewable_sources = [pv, wind]
-commodities = [rgas]
-storages = [storage]
-sinks = [demand]
-
-# groupt components
-components = transformers + renewable_sources + storages + sinks + commodities
-
-# create list of all entities
-entities = components + buses
-
-# TODO: other solver libraries should be passable
-simulation = es.Simulation(solver='gurobi', timesteps=timesteps,
-                           stream_solver_output=True,
-                           objective_options={
-                               'function':predefined_objectives.minimize_cost})
-
-energysystem = es.EnergySystem(entities=entities, simulation=simulation)
-energysystem.year = 2010
-
+# If you dumped the energysystem once, you can skip the optimisation wtih '#'
+# and use the restore method.
 energysystem.optimize()
 
+# energysystem.dump()
+# energysystem.restore()
 
-if __name__ == "__main__":
-    import postprocessing as pp
+# Creation of a multi-indexed pandas dataframe
+es_df = tpd.EnergySystemDataFrame(energy_system=energysystem,
+                                  idx_start_date="2016-01-01 00:00:00",
+                                  ixd_date_freq="H")
+es_df.data_frame.describe
 
-    data = renewable_sources+transformers+storages
+# Plotting line plots
+es_df.plot_bus(bus_uid="bel", bus_type="el", type="input",
+               date_from="2016-01-01 00:00:00",
+               date_to="2016-01-31 00:00:00",
+               title="January 2016", xlabel="Power in MW",
+               ylabel="Date", tick_distance=24*7)
 
-    pp.plot_dispatch(bel, energysystem.results,
-                     simulation.timesteps, data, storage, demand)
+es_df.plot_bus(bus_uid="bgas", bus_type="gas", type="output",
+               date_from="2016-01-01 00:00:00",
+               date_to="2016-12-31 00:00:00",
+               title="Year 2016", xlabel="Outflow in MW",
+               ylabel="Date", tick_distance=24*7*4*3)
 
-    pp.print_results(bel, data, demand,
-                     transformers, storage, energysystem)
+plt.show()
 
-    # Alternative plotting variant
-    # Setting the time range to plot
-    prange = pd.date_range(pd.datetime(energysystem.year, 6, 1, 0, 0),
-                           periods=168, freq='H')
-    pp.use_devplot(energysystem, bel.uid, prange)
+# Plotting a combined stacked plot
+fig = plt.figure(figsize=(24, 14))
+plt.rc('legend', **{'fontsize': 19})
+ax = fig.add_subplot(1, 1, 1)
+
+es_df.stackplot(bus_uid="bel", bus_type="el", ax=ax,
+                date_from="2016-06-01 00:00:00",
+                date_to="2016-06-8 00:00:00",
+                title="Electricity bus",
+                ylabel="Power in MW", xlabel="Date",
+                linewidth=4,
+                tick_distance=24)
+
+plt.show()
