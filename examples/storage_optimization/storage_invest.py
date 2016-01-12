@@ -32,12 +32,16 @@ The example models the following energy system:
 ###############################################################################
 import matplotlib.pyplot as plt
 import pandas as pd
+import logging
 
 # import solph module to create/process optimization model instance
 from oemof.solph import predefined_objectives as predefined_objectives
 
 # Outputlib
 from oemof.outputlib import to_pandas as tpd
+
+# Default logger of oemof
+from oemof.tools import logger
 
 # import oemof base classes to create energy system objects
 from oemof.core import energy_system as es
@@ -47,22 +51,27 @@ from oemof.core.network.entities.components import sources as source
 from oemof.core.network.entities.components import transformers as transformer
 
 
+# Define logger
+logger.define_logging()
+
 ###############################################################################
-# read data from csv file
+# read data from csv file and set time index
 ###############################################################################
 
+logging.info('Read data from csv file and set time index')
 data = pd.read_csv("storage_invest.csv", sep=",")
-timesteps = [t for t in range(8760)]
+time_index = pd.date_range('1/1/2012', periods=8760, freq='H')
 
 ###############################################################################
 # initialize the energy system
 ###############################################################################
 
+logging.info('Initialize the energy system')
 simulation = es.Simulation(
-    timesteps=timesteps, stream_solver_output=True, solver='glpk',
+    timesteps=range(len(time_index)), stream_solver_output=True, solver='glpk',
     objective_options={'function': predefined_objectives.minimize_cost})
 
-energysystem = es.EnergySystem(year=2016, simulation=simulation)
+energysystem = es.EnergySystem(time_idx=time_index, simulation=simulation)
 
 ###############################################################################
 # set optimzation options for storage components
@@ -71,9 +80,10 @@ energysystem = es.EnergySystem(year=2016, simulation=simulation)
 transformer.Storage.optimization_options.update({'investment': True})
 
 ###############################################################################
-# Create oemof objetc
+# Create oemof object
 ###############################################################################
 
+logging.info('Create oemof objects')
 # create bus
 bgas = Bus(uid="bgas",
            type="gas",
@@ -140,45 +150,62 @@ storage = transformer.Storage(uid='sto_simple',
 # Optimise the energy system and plot the results
 ###############################################################################
 
-# If you dumped the energysystem once, you can skip the optimisation wtih '#'
+logging.info('Optimise the energy system')
+
+# If you dumped the energysystem once, you can skip the optimisation with '#'
 # and use the restore method.
 energysystem.optimize()
 
-# energysystem.dump()
-# energysystem.restore()
+#energysystem.dump()
+#energysystem.restore()
 
 # Creation of a multi-indexed pandas dataframe
-es_df = tpd.EnergySystemDataFrame(energy_system=energysystem,
-                                  idx_start_date="2016-01-01 00:00:00",
-                                  ixd_date_freq="H")
+es_df = tpd.EnergySystemDataFrame(energy_system=energysystem)
+
+# Example usage of dataframe object
 es_df.data_frame.describe
+es_df.data_frame.index.get_level_values('bus_uid').unique()
+es_df.data_frame.index.get_level_values('bus_type').unique()
+
+# Example slice (see http://pandas.pydata.org/pandas-docs/stable/advanced.html)
+idx = pd.IndexSlice
+es_df.data_frame.loc[idx[:,
+                         'el',
+                         :,
+                         slice('pp_gas', 'pv'),
+                         slice(
+                             pd.Timestamp("2012-01-01 00:00:00"),
+                             pd.Timestamp("2012-01-01 01:00:00"))], :]
+
+logging.info('Plot the results')
+
+cdict = {'wind': '#5b5bae',
+         'pv': '#ffde32',
+         'sto_simple': '#42c77a',
+         'pp_gas': '#636f6b',
+         'demand': '#ce4aff'}
 
 # Plotting line plots
 es_df.plot_bus(bus_uid="bel", bus_type="el", type="input",
-               date_from="2016-01-01 00:00:00",
-               date_to="2016-01-31 00:00:00",
+               date_from="2012-01-01 00:00:00", colordict=cdict,
+               date_to="2012-01-31 00:00:00",
                title="January 2016", xlabel="Power in MW",
                ylabel="Date", tick_distance=24*7)
 
-es_df.plot_bus(bus_uid="bgas", bus_type="gas", type="output",
-               date_from="2016-01-01 00:00:00",
-               date_to="2016-12-31 00:00:00",
-               title="Year 2016", xlabel="Outflow in MW",
-               ylabel="Date", tick_distance=24*7*4*3)
+# Minimal parameter
+es_df.plot_bus(bus_uid="bel", bus_type="gas", type="output", title="Year 2016")
 
 plt.show()
 
 # Plotting a combined stacked plot
-fig = plt.figure(figsize=(24, 14))
-plt.rc('legend', **{'fontsize': 19})
-ax = fig.add_subplot(1, 1, 1)
 
-es_df.stackplot(bus_uid="bel", bus_type="el", ax=ax,
-                date_from="2016-06-01 00:00:00",
-                date_to="2016-06-8 00:00:00",
+es_df.stackplot("bel",
+                colordict=cdict,
+                date_from="2012-06-01 00:00:00",
+                date_to="2012-06-8 00:00:00",
                 title="Electricity bus",
                 ylabel="Power in MW", xlabel="Date",
                 linewidth=4,
-                tick_distance=24)
+                tick_distance=24, save=True)
 
 plt.show()

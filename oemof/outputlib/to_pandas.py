@@ -3,28 +3,18 @@
 
 import pandas as pd
 import logging
+import os
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 # TODO:
-# - Add storages to column "other".
-#   But only the state of charge? I think it is good to have load/unload
-#   as output/input (uwe)
-#   Yes! (Cord)
-#
-# - Create some "standard-slices" for plots e.g. all inputs of a specific bus
-# - Add option to use a real datetime-index as x-values and proper labeled
-#   y-values (e. g. not (wind,val) but wind) for subsets of the multiindex-df
 # - Make dataframe creation and plotting configurable with as less code as
-#   possible via **kwargs
-# - Add possibility to define that dataframe is only created for spefific busses
-#   e.g. only for electrical busses or a given list of busses. This might be
-#   helpful for very big problems like renpass-gis, etc.
+#   possible via self.result_object.get(i, {} and **kwargs
 
 
 class EnergySystemDataFrame:
     r"""Creates a multi-indexed pandas dataframe from a solph result object
-    and holds methods to plot subsets of the data
+    and holds methods to plot subsets of the data.
 
     Note
     ----
@@ -38,6 +28,12 @@ class EnergySystemDataFrame:
         Start date of the dataframe date index e.g. "2016-01-01 00:00:00"
     ixd_date_freq : string
         Frequency for the dataframe date index e.g. "H" for hours
+    bus_uids : list if strings
+        List of strings with busses that should be contained in dataframe.
+        If not set, all busses are contained.
+    bus_types : list if strings
+        List of strings with bus types that should be contained in dataframe.
+        If not set, all bus types are contained.
 
     Attributes
     ----------
@@ -48,19 +44,28 @@ class EnergySystemDataFrame:
     ixd_date_freq : string
         Frequency for the dataframe date index e.g. "H" for hours
     data_frame : pandas dataframe
-        Multi-indexed pandas dataframe holding the data from the result object
+        Multi-indexed pandas dataframe holding the data from the result object.
+        For more information on advanced dataframe indexing see:
+        http://pandas.pydata.org/pandas-docs/stable/advanced.html
+    bus_uids : list if strings
+        List of strings with busses that should be contained in dataframe
+    bus_types : list if strings
+        List of strings with bus types that should be contained in dataframe.
     """
     def __init__(self, **kwargs):
         # default values if not arguments are passed
-        kwargs.setdefault('ixd_date_freq', 'H')
-
-        self.result_object = kwargs.get('result_object')
         self.energy_system = kwargs.get('energy_system')
-        self.idx_start_date = kwargs.get('idx_start_date')
-        self.ixd_date_freq = kwargs.get('ixd_date_freq')
+        self.bus_uids = kwargs.get('bus_uids')
+        self.bus_types = kwargs.get('bus_types')
         self.data_frame = None
-        if not self.result_object:
-            self.result_object = self.energy_system.results
+        self.result_object = self.energy_system.results
+
+        if not self.bus_uids:
+            self.bus_uids = [e.uid for e in self.result_object.keys()
+                             if 'Bus' in str(e.__class__)]
+        if not self.bus_types:
+            self.bus_types = [e.type for e in self.result_object.keys()
+                              if 'Bus' in str(e.__class__)]
         if not (self.data_frame):
             self.data_frame = self.create()
 
@@ -75,19 +80,27 @@ class EnergySystemDataFrame:
         df = pd.DataFrame(columns=['bus_uid', 'bus_type', 'type',
                                    'obj_uid', 'datetime', 'val'])
         for e, o in self.result_object.items():
-            if 'Bus' in str(e.__class__):
+            # busses
+            if ('Bus' in str(e.__class__) and
+                    e.uid in self.bus_uids and
+                    e.type in self.bus_types):
                 row = pd.DataFrame()
                 # inputs
                 for i in e.inputs:
-                    if i in self.result_object:
+                    row['bus_uid'] = [e.uid]
+                    row['bus_type'] = [e.type]
+                    row['type'] = ['input']
+                    row['obj_uid'] = [i.uid]
+                    row['datetime'] = [self.energy_system.time_idx]
+                    row['val'] = [self.result_object[i].get(e)]
+                    df = df.append(row)
+                    # self referenced components
+                    if i in self.result_object.get(i, {}):
                         row['bus_uid'] = [e.uid]
                         row['bus_type'] = [e.type]
-                        row['type'] = ['input']
+                        row['type'] = ['other']
                         row['obj_uid'] = [i.uid]
-                        row['datetime'] = \
-                            [pd.date_range(self.idx_start_date,
-                             periods=len(self.result_object[i].get(e)),
-                             freq=self.ixd_date_freq)]
+                        row['datetime'] = [self.energy_system.time_idx]
                         row['val'] = [self.result_object[i].get(e)]
                         df = df.append(row)
                 # outputs
@@ -99,29 +112,18 @@ class EnergySystemDataFrame:
                         row['bus_type'] = [e.type]
                         row['type'] = ['output']
                         row['obj_uid'] = [k.uid]
-                        row['datetime'] = \
-                            [pd.date_range(self.idx_start_date,
-                             periods=len(v), freq=self.ixd_date_freq)]
+                        row['datetime'] = [self.energy_system.time_idx]
                         row['val'] = [v]
                         df = df.append(row)
                 # other
                 for k, v in o.items():
-                    row['bus_uid'] = [e.uid]
-                    row['bus_type'] = [e.type]
-                    row['type'] = ['other']
-                    # self referenced entries (duals, etc.) in else block
-                    if k is not e and isinstance(k, str):
-                        row['obj_uid'] = [k]
-                        row['datetime'] = \
-                            [pd.date_range(self.idx_start_date,
-                             periods=len(v), freq=self.ixd_date_freq)]
-                        row['val'] = [v]
-                        df = df.append(row)
-                    else:
+                    # self referenced entries (duals, etc.)
+                    if isinstance(k, str):
+                        row['bus_uid'] = [e.uid]
+                        row['bus_type'] = [e.type]
+                        row['type'] = ['other']
                         row['obj_uid'] = ['duals']
-                        row['datetime'] = \
-                            [pd.date_range(self.idx_start_date,
-                             periods=len(v), freq=self.ixd_date_freq)]
+                        row['datetime'] = [self.energy_system.time_idx]
                         row['val'] = [v]
                         df = df.append(row)
 
@@ -145,13 +147,12 @@ class EnergySystemDataFrame:
                                                  'obj_uid', 'datetime'])
         df_multiindex = pd.DataFrame(df_long['val'].values,
                                      columns=['val'], index=index)
-
         # sort MultiIndex to work correctly
         df_multiindex.sort_index(inplace=True)
 
         return df_multiindex
 
-    def plot_bus(self, **kwargs):
+    def plot_bus(self, bus_uid, **kwargs):
         r""" Method for plotting all inputs/outputs of a bus
 
         Parameters
@@ -159,66 +160,125 @@ class EnergySystemDataFrame:
         bus_uid : string
         bus_type : string (e.g. "el" or "gas")
         type : string (input/output/other)
-        date_from : string (Start date selection e.g. "2016-01-01 00:00:00")
-        date_to : string (End date selection e.g. "2016-03-01 00:00:00")
+        date_from : string, optional
+            Start date selection e.g. "2016-01-01 00:00:00". If not set, the
+            whole time range will be plotted.
+        date_to : string, optional
+            End date selection e.g. "2016-03-01 00:00:00". If not set, the
+            whole time range will be plotted.
         """
-        kwargs.setdefault('bus_uid', None)
-        kwargs.setdefault('bus_type', None)
+        kwargs.setdefault('date_from', self.energy_system.time_idx[0])
+        kwargs.setdefault('date_to', self.energy_system.time_idx[-1])
         kwargs.setdefault('type', None)
-        kwargs.setdefault('date_from', None)
-        kwargs.setdefault('date_to', None)
         kwargs.setdefault('kind', 'line')
         kwargs.setdefault('title', 'Connected components')
         kwargs.setdefault('xlabel', 'Date')
         kwargs.setdefault('ylabel', 'Power in MW')
         kwargs.setdefault('date_format', '%d-%m-%Y')
-        kwargs.setdefault('tick_distance', 24)
         kwargs.setdefault('subplots', False)
         kwargs.setdefault('colormap', 'Spectral')
-        kwargs.setdefault('mpl_style', 'ggplot')
         kwargs.setdefault('df_plot_kwargs', {})
         kwargs.setdefault('linewidth', 2)
+        kwargs.setdefault('number_autoticks', 3)
 
         # slicing
         idx = pd.IndexSlice
+
         subset = self.data_frame.loc[idx[
-            [kwargs.get('bus_uid')],
-            [kwargs.get('bus_type')],
+            [bus_uid],
+            :,
             [kwargs.get('type')],
             :,
             slice(
-                pd.Timestamp(kwargs.get('date_from')),
-                pd.Timestamp(kwargs.get('date_to')))]]
+                pd.Timestamp(kwargs['date_from']),
+                pd.Timestamp(kwargs['date_to']))]]
+
         # extracting levels to use them in plot
         obj_uids = subset.index.get_level_values('obj_uid').unique()
         dates = subset.index.get_level_values('datetime').unique()
+
         # unstacking object/component level to get columns
         subset = subset.unstack(level='obj_uid')
 
+        if kwargs.get('colordict'):
+            kwargs['colormap'] = None
+            kwargs['df_plot_kwargs']['color'] = list(
+                map(kwargs.get('colordict').get, list(subset['val'].columns)))
+
+        # if no tick distance is set, it is set automatically
+        if not kwargs.get('tick_distance'):
+            # if the ticks are set automatically date and time are shown
+            kwargs['tick_distance'] = int(len(dates) /
+                                          kwargs['number_autoticks']) - 1
+            kwargs['date_format'] = '%d-%m-%Y %H:%M'
+
         # plotting: set matplotlib style
-        mpl.style.use(kwargs.get('mpl_style'))
+        if kwargs.get('mpl_style'):
+            mpl.style.use(kwargs.get('mpl_style'))
+
         # plotting: basic pandas plot
-        axt = subset.plot(
+        ax = subset.plot(
             kind=kwargs.get('kind'), colormap=kwargs.get('colormap'),
             title=kwargs.get('title'), linewidth=kwargs.get('linewidth'),
             subplots=kwargs.get('subplots'), **kwargs['df_plot_kwargs'])
-        # plotting: adjustments        
-        [(ax.set_ylabel(kwargs.get('ylabel')),
-          ax.set_xlabel(kwargs.get('xlabel')),
-          # ax.set_xticks(range(0,len(dates),1), minor=True),
-          ax.set_xticks(range(0, len(dates), kwargs.get('tick_distance')),
-                        minor=False),
-          ax.set_xticklabels(
-              [item.strftime('%d-%m-%Y')
-               for item in dates.tolist()[0::kwargs.get('tick_distance')]],
-              rotation=0, minor=False),
-          ax.legend(obj_uids,
-                    loc='upper right')
-          )
-         for ax in plt.gcf().axes]
-        return axt
 
-    def stackplot(self, **kwargs):
+        # plotting: adjustments
+        ax.set_ylabel(kwargs.get('ylabel')),
+        ax.set_xlabel(kwargs.get('xlabel')),
+        # ax.set_xticks(range(0,len(dates),1), minor=True),
+        ax.set_xticks(range(0, len(dates), kwargs.get('tick_distance')),
+                      minor=False),
+        ax.set_xticklabels(
+            [item.strftime(kwargs['date_format'])
+             for item in dates.tolist()[0::kwargs.get('tick_distance')]],
+            rotation=0, minor=False),
+        ax.legend(obj_uids, loc='upper right')
+        return ax
+
+    def stackplot(self, bus_uid, **kwargs):
+        r"""Creating a matplotlib figure object.
+
+        Parameters
+        ----------
+        """
+        logging.info('Creating stackplot for Bus: {0}'.format(bus_uid))
+
+        kwargs.setdefault('autostyle', False)
+        kwargs.setdefault('figwidth', 24)
+        kwargs.setdefault('figheight', 14)
+        kwargs.setdefault('fontlegend', 19)
+        kwargs.setdefault('fontgeneral', 19)
+        kwargs.setdefault('style', 'grayscale')
+        kwargs.setdefault('show', True)
+        kwargs.setdefault('save', False)
+        kwargs.setdefault('savename', 'stackplot_{0}'.format(str(bus_uid)))
+        kwargs.setdefault('savepath', os.path.join(
+            os.environ['HOME'], '.oemof', 'plots'))
+
+        if not kwargs['autostyle']:
+            fig = plt.figure(figsize=(kwargs['figwidth'], kwargs['figheight']))
+            plt.rc('legend', **{'fontsize': kwargs['fontlegend']})
+            plt.rcParams.update({'font.size': kwargs['fontgeneral']})
+            plt.style.use(kwargs['style'])
+        else:
+            fig = plt.figure()
+
+        ax = fig.add_subplot(1, 1, 1)
+
+        self.stackplot_part(bus_uid, ax, **kwargs)
+
+        if kwargs['save']:
+            if not os.path.isdir(kwargs['savepath']):
+                os.mkdir(kwargs['savepath'])
+            fullpath = os.path.join(kwargs['savepath'],
+                                    kwargs['savename'] + '.pdf')
+            logging.info('Saving plot to {0}'.format(fullpath))
+            fig.savefig(fullpath)
+        if kwargs['show']:
+            plt.show(fig)
+        plt.close(fig)
+
+    def stackplot_part(self, bus_uid, ax, **kwargs):
         r"""Creating a matplotlib figure object.
 
         Parameters
@@ -229,8 +289,9 @@ class EnergySystemDataFrame:
         kwargs.setdefault('bus_uid', None)
         kwargs.setdefault('bus_type', None)
         kwargs.setdefault('ax', None)
-        kwargs.setdefault('date_from', None)
-        kwargs.setdefault('date_to', None)
+        kwargs.setdefault('date_from', self.energy_system.time_idx[0])
+        kwargs.setdefault('date_to', self.energy_system.time_idx[-1])
+        kwargs.setdefault('autostyle', False)
         kwargs.setdefault('width', 1)
         kwargs.setdefault('title', 'Connected components')
         kwargs.setdefault('xlabel', 'Date')
@@ -249,41 +310,46 @@ class EnergySystemDataFrame:
         kwargs.setdefault('shadow', True)
         kwargs.setdefault('drawstyle', 'steps-mid')
 
+        if kwargs['autostyle']:
+            kwargs['tick_distance'] = False
+
         my_kwargs = {
-            'ax': kwargs['ax'],
+            'ax': ax,
             'width': kwargs['width'],
             'stacked': True}
 
         ax = self.plot_bus(
-            bus_uid=kwargs['bus_uid'], bus_type=kwargs['bus_type'],
+            bus_uid, date_from=kwargs['date_from'], date_to=kwargs['date_to'],
             type="input", kind='bar', linewidth=0,
-            date_from=kwargs['date_from'],
-            date_to=kwargs['date_to'],
             colormap=kwargs['colormap_bar'], title=kwargs['title'],
             xlabel=kwargs['xlabel'], ylabel=kwargs['ylabel'],
+            colordict=kwargs.get('colordict'),
             tick_distance=kwargs['tick_distance'], df_plot_kwargs=my_kwargs)
 
         my_kwargs = {
-            'ax': kwargs['ax'],
+            'ax': ax,
             'stacked': True,
             'drawstyle': kwargs['drawstyle']}
 
         ax = self.plot_bus(
-            bus_uid=kwargs['bus_uid'], bus_type=kwargs['bus_type'],
+            bus_uid, date_from=kwargs['date_from'], date_to=kwargs['date_to'],
             type="output", kind='line', linewidth=kwargs['linewidth'],
-            date_from=kwargs['date_from'],
-            date_to=kwargs['date_to'],
             colormap=kwargs['colormap_line'], title=kwargs['title'],
+            colordict=kwargs.get('colordict'),
             xlabel=kwargs['xlabel'], ylabel=kwargs['ylabel'],
             tick_distance=kwargs['tick_distance'], df_plot_kwargs=my_kwargs)
 
         # Put a legend to the right of the current axis
         handles, labels = ax.get_legend_handles_labels()
-        box = ax.get_position()
-        ax.set_position([box.x0, box.y0, box.width * 0.9, box.height])
 
-        # Put a legend to the right of the current axis
-        ax.legend(reversed(handles), reversed(labels), loc=kwargs['loc'],
-                  bbox_to_anchor=kwargs['bbox_to_anchor'],
-                  ncol=kwargs['ncol'], fancybox=kwargs['fancybox'],
-                  shadow=kwargs['shadow'])
+        if not kwargs['autostyle']:
+            box = ax.get_position()
+            ax.set_position([box.x0, box.y0, box.width * 0.9, box.height])
+
+            # Put a legend to the right of the current axis
+            ax.legend(reversed(handles), reversed(labels), loc=kwargs['loc'],
+                      bbox_to_anchor=kwargs['bbox_to_anchor'],
+                      ncol=kwargs['ncol'], fancybox=kwargs['fancybox'],
+                      shadow=kwargs['shadow'])
+        else:
+            ax.legend(reversed(handles), reversed(labels))
