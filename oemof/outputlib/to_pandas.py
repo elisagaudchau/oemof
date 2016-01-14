@@ -61,10 +61,10 @@ class EnergySystemDataFrame:
         self.result_object = self.energy_system.results
 
         if not self.bus_uids:
-            self.bus_uids = [e.uid for e in self.result_object.keys()
+            self.bus_uids = [e.uid for e in self.energy_system.results.keys()
                              if 'Bus' in str(e.__class__)]
         if not self.bus_types:
-            self.bus_types = [e.type for e in self.result_object.keys()
+            self.bus_types = [e.type for e in self.energy_system.results.keys()
                               if 'Bus' in str(e.__class__)]
         if not (self.data_frame):
             self.data_frame = self.create()
