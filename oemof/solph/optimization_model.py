@@ -237,7 +237,7 @@ class OptimizationModel(po.ConcreteModel):
         """
         # TODO: Maybe make the results dictionary a proper object?
         result = UD()
-        result.objective = self.objective
+        result.objective = self.objective()
         for entity in self.entities:
             if ( isinstance(entity, cp.Transformer) or
                  isinstance(entity, cp.Transport)   or
